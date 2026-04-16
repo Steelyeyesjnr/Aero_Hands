@@ -1,0 +1,17 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+venv/
+
+# Project Specific
+aero_log_*.csv
+wind_tunnel_data_*.csv
+
+# Taichi Cache
+taichi_cache/
+
+# OS
+.DS_Store
+Thumbs.db
