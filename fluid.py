@@ -12,6 +12,8 @@ class FluidSolver:
         self.res_x = res_x
         self.res_y = res_y
         
+        self.mag_field = ti.field(dtype=ti.f32, shape=(res_x, res_y))
+        
         # Physics Fields
         self.velocity = ti.Vector.field(2, dtype=float, shape=(res_x, res_y))
         self.new_velocity = ti.Vector.field(2, dtype=float, shape=(res_x, res_y))
@@ -84,6 +86,33 @@ class FluidSolver:
         
         for i, j in self.pressure:
             self.pressure[i, j] = self.new_pressure[i, j]
+
+    @ti.kernel
+    def _calculate_velocity_mag(self):
+        for i, j in self.mag_field:
+            if i < self.res_x - 1 and j < self.res_y - 1:
+                u = (self.velocity[i, j][0] + self.velocity[i + 1, j][0]) * 0.5
+                v = (self.velocity[i, j][1] + self.velocity[i, j + 1][1]) * 0.5
+                self.mag_field[i, j] = ti.sqrt(u**2 + v**2)
+            else:
+                self.mag_field[i, j] = 0.0
+
+    def get_heatmap_data(self, mode="pressure"):
+        if mode == "pressure":
+            data = self.pressure.to_numpy()
+        else: # mode == "velocity"
+            self._calculate_velocity_mag()
+            data = self.mag_field.to_numpy()
+            
+        # 2. Normalise to 0.0 - 1.0 for OpenCV
+        # We use a small 'epsilon' (1e-6) to prevent division by zero
+        d_min, d_max = data.min(), data.max()
+        if d_max > d_min:
+            res = (data - d_min) / (d_max - d_min + 1e-6)
+        else:
+            res = np.zeros_like(data)
+            
+        return res
 
     def solve_pressure(self):
         self.compute_divergence()

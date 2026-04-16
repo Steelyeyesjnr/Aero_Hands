@@ -19,6 +19,8 @@ def main():
     current_aoa = 5.0 
     prev_left_hand_pos = None
     prev_hand_size = None  
+    view_mode = 0  # 0: Smoke, 1: Pressure, 2: Velocity
+    modes = ["SMOKE", "PRESSURE", "VELOCITY"]
     
     # Generate a unique log for this session
     log_filename = f"aero_log_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
@@ -53,6 +55,9 @@ def main():
                 writer.writerow(data_row)
             log_timer = 30 
 
+        if key == ord('v'):
+            view_mode = (view_mode + 1) % 3
+
         # CONTROLS
         if key == ord('c'):
             geom.clear_all()
@@ -64,7 +69,7 @@ def main():
             geom.load_airfoil_preset(w, h, 1, current_aoa)
             fluid.reset_simulation()
 
-        if key == ord('s'): # Fixed back to 'S'
+        if key == ord('.'): # Fixed back to 'S'
             sim_running = not sim_running
 
         if ord('1') <= key <= ord('5'):
@@ -114,25 +119,49 @@ def main():
         fluid.update_obstacles(geom.get_obstacle_mask(config.GRID_RES_X, config.GRID_RES_Y, w, h))
         if sim_running: fluid.step()
         
-        # 4. DASHBOARD
+        # --- 4. RENDER ENGINE & DASHBOARD ---
         cl, cd, l_d = fluid.get_stats()
-        density_data = fluid.get_render_data()
-        smoke_view = (cv2.resize(density_data.T, (w, h)) * 255).astype(np.uint8)
-        smoke_color = cv2.applyColorMap(smoke_view, cv2.COLORMAP_OCEAN)
+        
+        # Decide which data to pull from the solver based on view_mode
+        if view_mode == 0:    # SMOKE (Density)
+            raw_data = fluid.get_render_data()
+            cmap = cv2.COLORMAP_OCEAN
+        elif view_mode == 1:  # PRESSURE
+            raw_data = fluid.get_heatmap_data(mode="pressure")
+            cmap = cv2.COLORMAP_JET
+        else:                # VELOCITY
+            raw_data = fluid.get_heatmap_data(mode="velocity")
+            cmap = cv2.COLORMAP_MAGMA
 
-        cv2.rectangle(frame, (10, 50), (280, 200), (40, 40, 40), -1)
+        # Process the raw data into a displayable heatmap
+        # Note: We transpose (.T) because Taichi and OpenCV axes are swapped
+        heat_view = (cv2.resize(raw_data.T, (w, h)) * 255).astype(np.uint8)
+        flow_color = cv2.applyColorMap(heat_view, cmap)
+
+        # Draw Stats Box
+        cv2.rectangle(frame, (10, 10), (240, 155), (40, 40, 40), -1) 
+        
         font = cv2.FONT_HERSHEY_SIMPLEX
-        cv2.putText(frame, f"Lift (Cl): {cl:2.2f}", (20, 85), font, 0.7, (100, 255, 100), 2)
-        cv2.putText(frame, f"Drag (Cd): {cd:2.2f}", (20, 115), font, 0.7, (100, 100, 255), 2)
-        cv2.putText(frame, f"L/D Ratio: {l_d:2.2f}", (20, 145), font, 0.7, (255, 255, 100), 2)
-        cv2.putText(frame, f"Angle (AoA): {current_aoa:2.1f}", (20, 185), font, 0.7, (255, 255, 255), 2)
+        f_scale = 0.55  # Reduced from 0.7
+        thick = 1       # Reduced from 2 for a cleaner look
+        v_space = 25    # Tightened vertical spacing
+
+        # Text elements with adjusted positioning
+        cv2.putText(frame, f"Lift (Cl): {cl:2.2f}", (20, 35), font, f_scale, (100, 255, 100), thick)
+        cv2.putText(frame, f"Drag (Cd): {cd:2.2f}", (20, 35 + v_space), font, f_scale, (100, 100, 255), thick)
+        cv2.putText(frame, f"L/D Ratio: {l_d:2.2f}", (20, 35 + v_space*2), font, f_scale, (255, 255, 100), thick)
+        cv2.putText(frame, f"Angle (AoA): {current_aoa:2.1f}", (20, 35 + v_space*3), font, f_scale, (255, 255, 255), thick)
+        
+        mode_text = ["SMOKE", "PRESSURE", "VELOCITY"][view_mode]
+        cv2.putText(frame, f"MODE: {mode_text}", (20, 35 + v_space*4), font, f_scale, (0, 255, 255), thick)
 
         if log_timer > 0:
             cv2.putText(frame, "DATA LOGGED!", (w//2-100, h-50), font, 1.0, (0, 255, 255), 3)
             log_timer -= 1
             
-        cv2.imshow("Aero Hands - Virtual Wind Tunnel", cv2.addWeighted(frame, 0.6, smoke_color, 0.4, 0))
-
+        # Composite the hand-tracking frame with the physics heatmap
+        final_display = cv2.addWeighted(frame, 0.6, flow_color, 0.4, 0)
+        cv2.imshow("Aero Hands - Virtual Wind Tunnel", final_display)
     tracker.release()
     cv2.destroyAllWindows()
 
